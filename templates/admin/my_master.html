@@ -1,0 +1,11 @@
+{# Ini adalah template dasar custom untuk panel admin #} {# Kita mewarisi semua dari template dasar Flask-Admin #} {% extends 'admin/base.html' %} {# Blok ini digunakan untuk menambahkan elemen ke navbar kanan atas #} {% block access_control %} {% if
+current_user.is_authenticated and current_user.is_admin %}
+<div class="btn-group pull-right">
+    <a class="btn btn-outline-light disabled" href="#" style="pointer-events: none;">
+        <i class="fa fa-user"></i> Halo, {{ current_user.name }}
+    </a>
+    <a class="btn btn-danger" href="{{ url_for('auth.logout') }}">
+        <i class="fa fa-sign-out"></i> Log Out
+    </a>
+</div>
+{% endif %} {% endblock %}

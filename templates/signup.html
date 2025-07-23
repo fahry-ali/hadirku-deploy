@@ -1,0 +1,28 @@
+{% extends "base.html" %} {% block title %}Sign Up{% endblock %} {% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-6 col-lg-4">
+        <div class="card">
+            <div class="card-body">
+                <h3 class="card-title text-center mb-4">Registrasi Akun</h3>
+                <form method="POST" action="/signup">
+                    <div class="mb-3">
+                        <label for="name" class="form-label">Nama Lengkap</label>
+                        <input type="text" class="form-control" id="name" name="name" required>
+                        <small class="form-text text-muted">Nama ini akan menjadi identitas login Anda dan nama file foto referensi Anda.</small>
+                    </div>
+                    <div class="mb-3">
+                        <label for="password" class="form-label">Password</label>
+                        <input type="password" class="form-control" id="password" name="password" required>
+                    </div>
+                    <div class="d-grid">
+                        <button type="submit" class="btn btn-primary">Daftar & Lanjutkan</button>
+                    </div>
+                </form>
+                <p class="text-center mt-3">
+                    Sudah punya akun? <a href="{{ url_for('auth.login') }}">Login di sini</a>
+                </p>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

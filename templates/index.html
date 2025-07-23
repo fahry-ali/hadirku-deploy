@@ -1,0 +1,32 @@
+{% extends "base.html" %} {% block title %}Presensi{% endblock %} {% block content %}
+<div class="text-center">
+    <h2>Selamat Datang, {{ current_user.name }}!</h2>
+    <p>Posisikan wajah Anda di depan kamera dan klik tombol di bawah untuk melakukan presensi.</p>
+
+    <div class="camera-container mx-auto my-4">
+        <video id="video" width="640" height="480" autoplay playsinline></video>
+        <canvas id="canvas" width="640" height="480" style="display:none;"></canvas>
+    </div>
+    <div class="mb-4 mx-auto" style="max-width: 640px;">
+        <label for="course-select" class="form-label"><b>Pilih Mata Kuliah:</b></label>
+        <select class="form-select" id="course-select">
+        <option selected disabled>-- Pilih salah satu mata kuliah --</option>
+        {% for course in courses %}
+        <option value="{{ course.id }}">{{ course.kode_mk }} - {{ course.nama_mk }} ({{ course.dosen_pengampu }})</option>
+        {% endfor %}
+    </select>
+    </div>
+
+    <div class="camera-container mx-auto my-4">
+    </div>
+    <button id="attend-btn" class="btn btn-primary btn-lg">
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="currentColor" class="bi bi-camera-fill" viewBox="0 0 16 16">
+            <path d="M10.5 8.5a2.5 2.5 0 1 1-5 0 2.5 2.5 0 0 1 5 0"/>
+            <path d="M2 4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2h-1.172a2 2 0 0 1-1.414-.586l-.828-.828A2 2 0 0 0 9.172 2H6.828a2 2 0 0 0-1.414.586l-.828.828A2 2 0 0 1 3.172 4z"/>
+        </svg>
+        Ambil Presensi
+    </button>
+</div>
+{% endblock %} {% block scripts %}
+<script src="{{ url_for('static', filename='js/main.js') }}"></script>
+{% endblock %}

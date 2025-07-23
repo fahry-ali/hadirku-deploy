@@ -1,0 +1,31 @@
+{% extends "base.html" %} {% block title %}Login{% endblock %} {% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-6 col-lg-4">
+        <div class="card">
+            <div class="card-body">
+                <!-- Logo -->
+                <div class="text-center mb-4" style="max-width: 200px; margin: 0 auto;">
+                    <img src="{{ url_for('static', filename='img/logo.png') }}" alt="Logo Hadirku" class="img-fluid">
+                </div>
+                <h3 class="card-title text-center mb-4">Masuk Hadirku</h3>
+                <form method="POST" action="/login">
+                    <div class="mb-3">
+                        <label for="name" class="form-label">Nama Lengkap</label>
+                        <input type="text" class="form-control" id="name" name="name" required>
+                    </div>
+                    <div class="mb-3">
+                        <label for="password" class="form-label">Password</label>
+                        <input type="password" class="form-control" id="password" name="password" required>
+                    </div>
+                    <div class="d-grid">
+                        <button type="submit" class="btn btn-primary">Login</button>
+                    </div>
+                </form>
+                <p class="text-center mt-3">
+                    Belum punya akun? <a href="{{ url_for('auth.signup') }}">Daftar di sini</a>
+                </p>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
