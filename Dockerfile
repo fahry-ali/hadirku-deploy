@@ -1,35 +1,33 @@
-# Dockerfile untuk Railway dengan MediaPipe (lebih ringan dari dlib)
 FROM python:3.11-slim
 
-# Install system dependencies minimal untuk MediaPipe
+# Install system dependencies untuk MediaPipe dan OpenCV
 RUN apt-get update && apt-get install -y \
     libglib2.0-0 \
     libgl1-mesa-glx \
     libgoogle-glog0v5 \
+    libgomp1 \
+    libgstreamer1.0-0 \
+    libgstreamer-plugins-base1.0-0 \
     && rm -rf /var/lib/apt/lists/*
 
-# Set working directory
 WORKDIR /app
 
-# Copy requirements first untuk better caching
+# Copy dan install Python dependencies
 COPY requirements.txt .
-
-# Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy application code
+# Copy aplikasi
 COPY . .
 
-# Create necessary directories
+# Create directories untuk uploads dan database
 RUN mkdir -p static/captures instance
 
 # Expose port
 EXPOSE 8080
 
-# Environment variables
+# Set environment variables
+ENV FLASK_APP=app.py
 ENV FLASK_ENV=production
-ENV PYTHONUNBUFFERED=1
-ENV PORT=8080
 
-# Run the application
+# Run aplikasi
 CMD ["python", "app.py"]
