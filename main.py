@@ -11,7 +11,7 @@ from flask_login import login_required, current_user
 from sqlalchemy.orm import joinedload
 
 from models import db, User, MataKuliah, AttendanceRecord
-from face_utils import generate_encoding_from_image, find_match_in_db
+from face_utils_mediapipe import generate_encoding_from_image, find_match_in_db
 
 main = Blueprint('main', __name__)
 
