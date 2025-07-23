@@ -1,0 +1,14 @@
+[phases.setup]
+nixPkgs = ["cmake", "gcc", "gxx", "python311"]
+
+[phases.install]
+cmds = [
+    "pip install cmake",
+    "pip install --no-cache-dir -r requirements.txt"
+]
+
+[phases.build]
+cmds = ["echo 'Build phase complete'"]
+
+[start]
+cmd = "python app.py"
