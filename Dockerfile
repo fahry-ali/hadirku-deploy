@@ -1,16 +1,11 @@
-# Dockerfile untuk Railway dengan support dlib
+# Dockerfile untuk Railway dengan MediaPipe (lebih ringan dari dlib)
 FROM python:3.11-slim
 
-# Install system dependencies untuk dlib
+# Install system dependencies minimal untuk MediaPipe
 RUN apt-get update && apt-get install -y \
-    cmake \
-    build-essential \
-    libopenblas-dev \
-    liblapack-dev \
-    libx11-dev \
-    libgtk-3-dev \
-    libboost-python-dev \
-    libboost-thread-dev \
+    libglib2.0-0 \
+    libgl1-mesa-glx \
+    libgoogle-glog0v5 \
     && rm -rf /var/lib/apt/lists/*
 
 # Set working directory
