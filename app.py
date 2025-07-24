@@ -1,173 +1,131 @@
 import os
-from flask import Flask
+import logging
+from flask import Flask, render_template, request, redirect, url_for, flash
+from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager
+from flask_admin import Admin
+from werkzeug.security import generate_password_hash
+from datetime import datetime
+import pytz
 
-#Impor db dan model dari file models.py
-from models import db, User
+# Initialize extensions
+db = SQLAlchemy()
+login_manager = LoginManager()
 
 def create_app():
-    """
-    Factory function untuk membuat dan mengkonfigurasi aplikasi Flask.
-    """
     app = Flask(__name__, instance_relative_config=True)
-
-    # --- Konfigurasi Aplikasi ---
-    # Production environment variables
-    app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'ganti-dengan-kunci-rahasia-yang-sangat-kuat')
     
-    # Database configuration untuk Railway
+    # Configuration
+    app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'hadirku-super-secret-key-2025')
+    
+    # Database configuration
     database_url = os.environ.get('DATABASE_URL')
     if database_url:
-        # Railway PostgreSQL - fix untuk Railway
         if database_url.startswith('postgres://'):
             database_url = database_url.replace('postgres://', 'postgresql://', 1)
         app.config['SQLALCHEMY_DATABASE_URI'] = database_url
     else:
-        # Local SQLite fallback
         app.config['SQLALCHEMY_DATABASE_URI'] = f"sqlite:///{os.path.join(app.instance_path, 'attendance.db')}"
     
     app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-    app.config['FLASK_ADMIN_SWATCH'] = 'cerulean'
-
-    # --- Inisialisasi Ekstensi ---
-    db.init_app(app)
     
-    login_manager = LoginManager()
+    # PERBAIKAN: Error handling configuration
+    app.config['WTF_CSRF_ENABLED'] = False  # Disable CSRF untuk admin panel
+    
+    # Logging configuration
+    if not app.debug:
+        logging.basicConfig(level=logging.INFO)
+    
+    # Initialize extensions with app
+    db.init_app(app)
     login_manager.init_app(app)
     login_manager.login_view = 'auth.login'
-
-    # --- User Loader ---
+    login_manager.login_message = 'Silakan login untuk mengakses halaman ini.'
+    login_manager.login_message_category = 'info'
+    
+    # Import models
+    from models import User, Subject, AttendanceRecord
+    
+    # User loader
     @login_manager.user_loader
     def load_user(user_id):
         return User.query.get(int(user_id))
-
-    # --- Registrasi Blueprints (Rute) ---
-    from auth import auth as auth_blueprint
-    app.register_blueprint(auth_blueprint)
-
-    from main import main as main_blueprint
-    app.register_blueprint(main_blueprint)
-
-    # Health check endpoint untuk Railway
-    @app.route('/health')
-    def health_check():
-        return {'status': 'healthy', 'service': 'hadirku-project'}
     
-    # Setup endpoint untuk Railway manual setup
-    @app.route('/setup-admin/<password>')
-    def setup_admin_endpoint(password):
-        """
-        Endpoint untuk create admin secara manual di Railway
-        Usage: https://your-app.railway.app/setup-admin/yourpassword
-        """
-        if password != "railway123":  # Simple security
-            return {'error': 'Invalid setup password'}, 403
-            
-        from models import User, MataKuliah
-        from werkzeug.security import generate_password_hash
-        
+    # PERBAIKAN: Error handlers
+    @app.errorhandler(500)
+    def internal_error(error):
+        db.session.rollback()
+        app.logger.error('Server Error: %s', error)
+        flash('Terjadi kesalahan internal. Silakan coba lagi.', 'danger')
+        return redirect(url_for('admin.index'))
+    
+    @app.errorhandler(Exception)
+    def handle_exception(e):
+        db.session.rollback()
+        app.logger.error('Unhandled Exception: %s', e)
+        flash(f'Error: {str(e)}', 'danger')
+        return redirect(request.referrer or url_for('main.index'))
+    
+    # Register blueprints
+    from main import main
+    from auth import auth
+    app.register_blueprint(main)
+    app.register_blueprint(auth, url_prefix='/auth')
+    
+    # Initialize admin
+    from admin import init_admin
+    init_admin(app)
+    
+    # Create database tables and setup
+    with app.app_context():
         try:
-            # Create admin if not exists
-            admin_exists = User.query.filter_by(is_admin=True).first()
-            if not admin_exists:
+            # Create tables
+            db.create_all()
+            
+            # Create admin user if not exists
+            admin_user = User.query.filter_by(is_admin=True).first()
+            if not admin_user:
                 admin_user = User(
-                    name="admin",
-                    password=generate_password_hash("admin123", method='pbkdf2:sha256'),
+                    name='Administrator',
+                    nim='ADMIN001',
+                    email='admin@hadirku.com',
                     is_admin=True
                 )
+                admin_user.set_password('admin123')
                 db.session.add(admin_user)
-            
-            # Create courses if not exists
-            course_exists = MataKuliah.query.first()
-            if not course_exists:
-                courses = [
-                    MataKuliah(kode_mk="S1076", nama_mk="Kecerdasan Bisnis", dosen_pengampu="Yanuar Wicaksono, S.Kom., M.Kom"),
-                    MataKuliah(kode_mk="SI079", nama_mk="Sistem Pendukung Keputusan", dosen_pengampu="Dadang Heksaputra, S.Kom., M.Kom."),
-                    MataKuliah(kode_mk="S1081", nama_mk="Manajemen Proyek", dosen_pengampu="Raden Nur Rachman Dzakiyullah, S.Kom., M.Sc."),
-                    MataKuliah(kode_mk="S1084", nama_mk="Statistika untuk Bisnis", dosen_pengampu="Asti Ratnasari, S.Kom., M.Kom")
+                
+                # Add sample subjects
+                sample_subjects = [
+                    {'code': 'S1076', 'name': 'Kecerdasan Bisnis', 'description': 'Yanuar Wicaksono, S.Kom., M.Kom'},
+                    {'code': 'S1079', 'name': 'Sistem Pendukung Keputusan', 'description': 'Dadang Heksaputra, S.Kom., M.Kom.'},
+                    {'code': 'S1081', 'name': 'Manajemen Proyek', 'description': 'Raden Nur Rachman Dzakiyullah, S.Kom., M.Sc.'},
+                    {'code': 'S1084', 'name': 'Statistika untuk Bisnis', 'description': 'Asti Ratnasari, S.Kom., M.Kom'},
                 ]
-                for course in courses:
-                    db.session.add(course)
-            
-            db.session.commit()
-            
-            return {
-                'status': 'success',
-                'message': 'Admin and courses created successfully',
-                'admin_username': 'admin',
-                'admin_password': 'admin123',
-                'login_url': '/login'
-            }
-            
+                
+                for subject_data in sample_subjects:
+                    if not Subject.query.filter_by(code=subject_data['code']).first():
+                        subject = Subject(**subject_data)
+                        db.session.add(subject)
+                
+                db.session.commit()
+                app.logger.info("Database initialized with admin user and sample subjects")
+        
         except Exception as e:
             db.session.rollback()
-            return {'error': str(e)}, 500
-
-    with app.app_context():
-        # --- Inisialisasi Panel Admin ---
-        from admin import setup_admin
-        setup_admin(app, db)
-
-        # --- Membuat Folder dan Database ---
-        try:
-            os.makedirs(app.instance_path)
-        except OSError:
-            pass 
-
-        captures_path = os.path.join(app.static_folder, 'captures')
-        if not os.path.exists(captures_path):
-            os.makedirs(captures_path)
-            
-        # Membuat semua tabel database jika belum ada
-        db.create_all()
-        
-        # --- AUTO SETUP untuk Railway ---
-        setup_initial_data()
-
+            app.logger.error(f"Database initialization error: {e}")
+    
+    # Health check endpoint
+    @app.route('/health')
+    def health_check():
+        return {
+            'status': 'healthy',
+            'service': 'hadirku-project',
+            'timestamp': datetime.now().isoformat()
+        }
+    
     return app
-
-def setup_initial_data():
-    """
-    Setup initial data untuk Railway deployment
-    """
-    from models import User, MataKuliah
-    from werkzeug.security import generate_password_hash
-    
-    # 1. Create default admin jika belum ada
-    admin_exists = User.query.filter_by(is_admin=True).first()
-    if not admin_exists:
-        default_admin = User(
-            name="admin",
-            password=generate_password_hash("admin123", method='pbkdf2:sha256'),
-            is_admin=True
-        )
-        db.session.add(default_admin)
-        print("✅ Default admin created: username=admin, password=admin123")
-    
-    # 2. Create mata kuliah jika belum ada
-    course_exists = MataKuliah.query.first()
-    if not course_exists:
-        courses = [
-            MataKuliah(kode_mk="S1076", nama_mk="Kecerdasan Bisnis", dosen_pengampu="Yanuar Wicaksono, S.Kom., M.Kom"),
-            MataKuliah(kode_mk="SI079", nama_mk="Sistem Pendukung Keputusan", dosen_pengampu="Dadang Heksaputra, S.Kom., M.Kom."),
-            MataKuliah(kode_mk="S1081", nama_mk="Manajemen Proyek", dosen_pengampu="Raden Nur Rachman Dzakiyullah, S.Kom., M.Sc."),
-            MataKuliah(kode_mk="S1084", nama_mk="Statistika untuk Bisnis", dosen_pengampu="Asti Ratnasari, S.Kom., M.Kom")
-        ]
-        for course in courses:
-            db.session.add(course)
-        print("✅ Default courses created")
-    
-    try:
-        db.session.commit()
-        print("✅ Initial data setup completed")
-    except Exception as e:
-        db.session.rollback()
-        print(f"❌ Error setting up initial data: {e}")
 
 if __name__ == '__main__':
     app = create_app()
-    # Production configuration
     port = int(os.environ.get('PORT', 5000))
-    debug_mode = os.environ.get('FLASK_ENV') != 'production'
-    app.run(debug=debug_mode, host='0.0.0.0', port=port)
-
+    app.run(debug=False, host='0.0.0.0', port=port)    
