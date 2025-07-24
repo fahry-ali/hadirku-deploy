@@ -1,73 +1,99 @@
-import os
-import pytz
-from flask import url_for, redirect, flash, render_template
-from flask_login import current_user
-from flask_admin import Admin, AdminIndexView, expose
+from flask import redirect, url_for, flash, request
+from flask_admin import Admin, BaseView, expose, AdminIndexView
 from flask_admin.contrib.sqla import ModelView
-from markupsafe import Markup
-
-from models import User, MataKuliah, AttendanceRecord, db
+from flask_admin import rules
+from flask_admin.form import rules
+from flask_login import current_user
+from wtforms import ValidationError
+from models import User, Subject, AttendanceRecord
+from app import db
 
 class MyAdminIndexView(AdminIndexView):
-    @expose('/')
-    def index(self):
-        if not current_user.is_authenticated or not current_user.is_admin:
-            return redirect(url_for('auth.login'))
-        
-        recent_records = AttendanceRecord.query.order_by(AttendanceRecord.timestamp.desc()).limit(10).all()
-        wib = pytz.timezone('Asia/Jakarta')
-        for record in recent_records:
-            record.local_time = record.timestamp.replace(tzinfo=pytz.utc).astimezone(wib)
-
-        return self.render('admin/index.html', recent_records=recent_records)
-
     def is_accessible(self):
         return current_user.is_authenticated and current_user.is_admin
-
+    
     def inaccessible_callback(self, name, **kwargs):
-        flash("Anda harus login sebagai admin untuk mengakses halaman ini.", "warning")
         return redirect(url_for('auth.login'))
 
-
-class AttendanceAdminView(ModelView):
-    can_create = False
-    can_edit = False
-    can_delete = True
-    page_size = 50
-    column_list = ['user', 'matakuliah', 'timestamp', 'location', 'image_path']
-    column_labels = {'user': 'Nama Mahasiswa', 'matakuliah': 'Mata Kuliah', 'timestamp': 'Waktu Presensi (UTC)', 'location': 'Lokasi (Peta)', 'image_path': 'Bukti Foto'}
-
-    def _location_formatter(view, context, model, name):
-        if model.latitude and model.longitude:
-            link = f"https://www.google.com/maps?q={model.latitude},{model.longitude}"
-            return Markup(f'<a href="{link}" target="_blank">Lihat Lokasi</a>')
-        return "N/A"
-
-    def _list_thumbnail(self, context, model, name):
-        if not model.image_path: return ''
-        return Markup(f'<img src="{url_for("static", filename=model.image_path)}" width="100" class="img-thumbnail">')
-
-    column_formatters = {'image_path': _list_thumbnail, 'location': _location_formatter}
-    
+class UserAdmin(ModelView):
     def is_accessible(self):
         return current_user.is_authenticated and current_user.is_admin
+    
+    def inaccessible_callback(self, name, **kwargs):
+        return redirect(url_for('auth.login'))
+    
+    column_list = ['name', 'nim', 'email', 'is_admin', 'created_at']
+    column_searchable_list = ['name', 'nim', 'email']
+    column_filters = ['is_admin', 'created_at']
+    
+    # Hide sensitive fields
+    form_excluded_columns = ['password_hash', 'face_encoding']
+    column_exclude_list = ['password_hash', 'face_encoding']
 
-
-class UserAdminView(ModelView):
-    column_list = ['id', 'name', 'is_admin']
-    column_exclude_list = ['password']
-    # Sesuaikan dengan nama kolom baru di model User
-    form_excluded_columns = ['password', 'records', 'face_encoding']
-    column_searchable_list = ['name']
-    column_filters = ['is_admin']
-
+class SubjectAdmin(ModelView):
     def is_accessible(self):
         return current_user.is_authenticated and current_user.is_admin
-
-
-def setup_admin(app, db):
-    admin = Admin(app, name='Dashboard Presensi', template_mode='bootstrap4', base_template='admin/my_master.html', index_view=MyAdminIndexView(name="Dashboard", url="/admin"))
     
-    admin.add_view(UserAdminView(User, db.session, name="Data Pengguna"))
-    admin.add_view(ModelView(MataKuliah, db.session, name="Data Mata Kuliah", category="Manajemen"))
-    admin.add_view(AttendanceAdminView(AttendanceRecord, db.session, name="Riwayat Presensi", category="Manajemen"))
+    def inaccessible_callback(self, name, **kwargs):
+        return redirect(url_for('auth.login'))
+    
+    # PERBAIKAN: Form configuration yang benar
+    form_columns = ['code', 'name', 'description']
+    column_list = ['code', 'name', 'description', 'created_at']
+    column_searchable_list = ['code', 'name']
+    column_filters = ['code', 'name']
+    
+    # Labels dalam bahasa Indonesia
+    column_labels = {
+        'code': 'Kode MK',
+        'name': 'Nama MK', 
+        'description': 'Dosen Pengampu',
+        'created_at': 'Dibuat Pada'
+    }
+    
+    # PERBAIKAN: Validasi yang benar
+    def on_model_change(self, form, model, is_created):
+        # Validasi required fields
+        if not model.code or not model.code.strip():
+            raise ValidationError('Kode mata kuliah harus diisi!')
+        
+        if not model.name or not model.name.strip():
+            raise ValidationError('Nama mata kuliah harus diisi!')
+        
+        # Clean data
+        model.code = model.code.strip().upper()
+        model.name = model.name.strip()
+        if model.description:
+            model.description = model.description.strip()
+        
+        # Check duplicate hanya saat create
+        if is_created:
+            existing = Subject.query.filter_by(code=model.code).first()
+            if existing:
+                raise ValidationError(f'Kode mata kuliah "{model.code}" sudah ada!')
+
+class AttendanceAdmin(ModelView):
+    def is_accessible(self):
+        return current_user.is_authenticated and current_user.is_admin
+    
+    def inaccessible_callback(self, name, **kwargs):
+        return redirect(url_for('auth.login'))
+    
+    column_list = ['user.name', 'user.nim', 'subject.name', 'status', 'timestamp']
+    column_searchable_list = ['user.name', 'user.nim']
+    column_filters = ['status', 'timestamp']
+    
+    column_labels = {
+        'user.name': 'Nama Mahasiswa',
+        'user.nim': 'NIM',
+        'subject.name': 'Mata Kuliah',
+        'status': 'Status',
+        'timestamp': 'Waktu Presensi'
+    }
+
+def init_admin(app):
+    admin = Admin(app, name='Admin Hadirku', template_mode='bootstrap3', index_view=MyAdminIndexView())
+    admin.add_view(UserAdmin(User, db.session, name='Pengguna'))
+    admin.add_view(SubjectAdmin(Subject, db.session, name='Mata Kuliah'))
+    admin.add_view(AttendanceAdmin(AttendanceRecord, db.session, name='Rekord Presensi'))
+    return admin
