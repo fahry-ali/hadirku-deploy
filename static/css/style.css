@@ -46,3 +46,23 @@ body {
     display: block;
     /* Menghilangkan spasi ekstra di bawah video */
 }
+
+/* Logo styling */
+.navbar-brand img {
+    transition: transform 0.3s ease;
+    border-radius: 4px;
+}
+
+.navbar-brand:hover img {
+    transform: scale(1.05);
+}
+
+/* Ensure logo doesn't break on small screens */
+@media (max-width: 576px) {
+    .navbar-brand img {
+        height: 28px;
+    }
+    .navbar-brand span {
+        font-size: 1.1rem;
+    }
+}
