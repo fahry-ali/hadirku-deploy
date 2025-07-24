@@ -1,8 +1,7 @@
 from flask import redirect, url_for, flash, request
 from flask_admin import Admin, BaseView, expose, AdminIndexView
 from flask_admin.contrib.sqla import ModelView
-from flask_admin import rules
-from flask_admin.form import rules
+from flask_admin.form import rules  # PERBAIKAN: Import rules dari flask_admin.form
 from flask_login import current_user
 from wtforms import ValidationError
 from models import User, Subject, AttendanceRecord
@@ -37,7 +36,7 @@ class SubjectAdmin(ModelView):
     def inaccessible_callback(self, name, **kwargs):
         return redirect(url_for('auth.login'))
     
-    # PERBAIKAN: Form configuration yang benar
+    # Form configuration
     form_columns = ['code', 'name', 'description']
     column_list = ['code', 'name', 'description', 'created_at']
     column_searchable_list = ['code', 'name']
@@ -51,7 +50,7 @@ class SubjectAdmin(ModelView):
         'created_at': 'Dibuat Pada'
     }
     
-    # PERBAIKAN: Validasi yang benar
+    # Validasi
     def on_model_change(self, form, model, is_created):
         # Validasi required fields
         if not model.code or not model.code.strip():
