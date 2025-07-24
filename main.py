@@ -1,135 +1,189 @@
-import os
-import base64
-import pickle
-from datetime import date, datetime
-import numpy as np
-import cv2
-import pytz
-
-from flask import Blueprint, render_template, jsonify, request, current_app, redirect, url_for, flash
+from flask import Blueprint, render_template, request, redirect, url_for, flash, jsonify
 from flask_login import login_required, current_user
-from sqlalchemy.orm import joinedload
-
-from models import db, User, MataKuliah, AttendanceRecord
+from werkzeug.utils import secure_filename
+import os
+import cv2
+import numpy as np
+from datetime import datetime
+import pytz
+import base64
+from io import BytesIO
+from PIL import Image
+from models import db, User, Subject, AttendanceRecord  # PERBAIKAN: MataKuliah → Subject
 from face_utils_mediapipe import generate_encoding_from_image, find_match_in_db
+import logging
 
 main = Blueprint('main', __name__)
 
 @main.route('/')
-@login_required
 def index():
-    if current_user.is_admin:
-        return redirect(url_for('admin.index'))
-    else:
-        # Cek apakah pengguna sudah mendaftarkan wajah (punya encoding)
-        if current_user.face_encoding is None:
-            flash('Anda belum mendaftarkan wajah. Silakan selesaikan pendaftaran.', 'warning')
-            return redirect(url_for('main.register_face'))
-        
-        courses = MataKuliah.query.order_by(MataKuliah.nama_mk).all()
-        return render_template('index.html', name=current_user.name, courses=courses)
-
-
-@main.route('/records')
-@login_required
-def records():
-    if current_user.is_admin:
-        return redirect(url_for('admin.index'))
-
-    wib = pytz.timezone('Asia/Jakarta')
-    user_records = AttendanceRecord.query.options(
-        joinedload(AttendanceRecord.matakuliah)
-    ).filter_by(user_id=current_user.id).order_by(AttendanceRecord.timestamp.desc()).all()
-
-    for record in user_records:
-        record.local_time = record.timestamp.replace(tzinfo=pytz.utc).astimezone(wib)
-        
-    return render_template('records.html', records=user_records, name=current_user.name)
-
-
-@main.route('/mark_attendance', methods=['POST'])
-@login_required
-def mark_attendance():
-    data = request.get_json()
-    if not all(k in data for k in ['image_data', 'location', 'matakuliah_id']):
-        return jsonify({'status': 'error', 'message': 'Permintaan tidak lengkap.'}), 400
-
-    # Cek absensi duplikat
-    today = date.today()
-    if AttendanceRecord.query.filter(
-        AttendanceRecord.user_id == current_user.id,
-        AttendanceRecord.matakuliah_id == data['matakuliah_id'],
-        db.func.date(AttendanceRecord.timestamp) == today
-    ).first():
-        return jsonify({'status': 'warning', 'message': 'Anda sudah presensi untuk mata kuliah ini hari ini.'})
-
-    # Decode gambar dan konversi ke RGB
-    try:
-        image_data = data['image_data'].split(',')[1]
-        img_bytes = base64.b64decode(image_data)
-        np_arr = np.frombuffer(img_bytes, np.uint8)
-        frame = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
-        rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-    except Exception as e:
-        return jsonify({'status': 'error', 'message': f'Format data gambar tidak valid: {e}'})
-
-    # Panggil fungsi pencocokan dari face_utils
-    matched_user_id, message = find_match_in_db(rgb_frame)
-
-    if matched_user_id == current_user.id:
-        timestamp_str = datetime.now().strftime("%Y%m%d_%H%M%S")
-        image_filename = f"{current_user.name}_{timestamp_str}.jpg"
-        full_image_path = os.path.join(current_app.static_folder, 'captures', image_filename)
-        cv2.imwrite(full_image_path, frame)
-        
-        new_record = AttendanceRecord(
-            user_id=current_user.id,
-            matakuliah_id=data['matakuliah_id'],
-            latitude=data['location'].get('latitude'),
-            longitude=data['location'].get('longitude'),
-            image_path=f"captures/{image_filename}"
-        )
-        db.session.add(new_record)
-        db.session.commit()
-        return jsonify({'status': 'success', 'message': f'Presensi untuk {current_user.name} berhasil!'})
-    
-    elif matched_user_id is not None:
-        matched_user = User.query.get(matched_user_id)
-        return jsonify({'status': 'error', 'message': f'Wajah terdeteksi sebagai {matched_user.name}, bukan {current_user.name}.'})
-    else:
-        return jsonify({'status': 'error', 'message': message})
-
+    if current_user.is_authenticated:
+        return render_template('index.html', user=current_user)
+    return render_template('index.html')
 
 @main.route('/register_face')
 @login_required
 def register_face():
     return render_template('register_face.html')
 
-
-@main.route('/save_face', methods=['POST'])
+@main.route('/process_face_registration', methods=['POST'])
 @login_required
-def save_face():
-    data = request.get_json()
-    if 'image_data' not in data:
-        return jsonify({'status': 'error', 'message': 'Data gambar tidak ditemukan.'})
-
+def process_face_registration():
     try:
-        image_data = data['image_data'].split(',')[1]
-        img_bytes = base64.b64decode(image_data)
-        np_arr = np.frombuffer(img_bytes, np.uint8)
-        frame = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
-        rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-    except Exception:
-        return jsonify({'status': 'error', 'message': 'Format data gambar tidak valid.'})
+        data = request.get_json()
+        image_data = data.get('image')
+        
+        if not image_data:
+            return jsonify({'success': False, 'message': 'Tidak ada data gambar'})
+        
+        # Decode base64 image
+        image_data = image_data.split(',')[1]
+        image_bytes = base64.b64decode(image_data)
+        image = Image.open(BytesIO(image_bytes))
+        
+        # Convert ke RGB array
+        image_rgb = np.array(image.convert('RGB'))
+        
+        # Generate face encoding
+        encoding = generate_encoding_from_image(image_rgb)
+        
+        if encoding is None:
+            return jsonify({'success': False, 'message': 'Wajah tidak terdeteksi. Pastikan wajah terlihat jelas.'})
+        
+        # Save encoding to user
+        current_user.face_encoding = encoding.tobytes()
+        db.session.commit()
+        
+        return jsonify({'success': True, 'message': 'Registrasi wajah berhasil!'})
+        
+    except Exception as e:
+        logging.error(f"Face registration error: {e}")
+        return jsonify({'success': False, 'message': f'Error: {str(e)}'})
 
-    encoding = generate_encoding_from_image(rgb_frame)
+@main.route('/attendance')
+@login_required
+def attendance():
+    subjects = Subject.query.all()  # PERBAIKAN: MataKuliah → Subject
+    return render_template('attendance.html', subjects=subjects)
+
+@main.route('/process_attendance', methods=['POST'])
+@login_required
+def process_attendance():
+    try:
+        data = request.get_json()
+        image_data = data.get('image')
+        subject_id = data.get('subject_id')
+        
+        if not image_data or not subject_id:
+            return jsonify({'success': False, 'message': 'Data tidak lengkap'})
+        
+        # Decode image
+        image_data = image_data.split(',')[1]
+        image_bytes = base64.b64decode(image_data)
+        image = Image.open(BytesIO(image_bytes))
+        image_rgb = np.array(image.convert('RGB'))
+        
+        # Generate encoding from captured image
+        captured_encoding = generate_encoding_from_image(image_rgb)
+        
+        if captured_encoding is None:
+            return jsonify({'success': False, 'message': 'Wajah tidak terdeteksi'})
+        
+        # Find match in database
+        matched_user = find_match_in_db(captured_encoding)
+        
+        if not matched_user:
+            return jsonify({'success': False, 'message': 'Wajah tidak dikenali'})
+        
+        # Check if user already attended today
+        today = datetime.now(pytz.timezone('Asia/Jakarta')).date()
+        existing_record = AttendanceRecord.query.filter_by(
+            user_id=matched_user.id,
+            subject_id=subject_id
+        ).filter(
+            db.func.date(AttendanceRecord.timestamp) == today
+        ).first()
+        
+        if existing_record:
+            return jsonify({'success': False, 'message': 'Anda sudah melakukan presensi hari ini'})
+        
+        # Create attendance record
+        attendance = AttendanceRecord(
+            user_id=matched_user.id,
+            subject_id=subject_id,
+            status='hadir',
+            timestamp=datetime.now(pytz.timezone('Asia/Jakarta'))
+        )
+        
+        db.session.add(attendance)
+        db.session.commit()
+        
+        return jsonify({
+            'success': True, 
+            'message': f'Presensi berhasil untuk {matched_user.name}',
+            'user_name': matched_user.name
+        })
+        
+    except Exception as e:
+        logging.error(f"Attendance processing error: {e}")
+        return jsonify({'success': False, 'message': f'Error: {str(e)}'})
+
+@main.route('/records')
+@login_required
+def records():
+    if current_user.is_admin:
+        # Admin can see all records
+        records = AttendanceRecord.query.join(User).join(Subject).order_by(
+            AttendanceRecord.timestamp.desc()
+        ).all()
+    else:
+        # Users can only see their own records
+        records = AttendanceRecord.query.filter_by(user_id=current_user.id).join(Subject).order_by(
+            AttendanceRecord.timestamp.desc()
+        ).all()
     
-    if encoding is None:
-        return jsonify({'status': 'error', 'message': 'Gagal memproses wajah. Pastikan hanya ada SATU wajah di foto dan terlihat jelas.'})
+    return render_template('records.html', records=records)
 
-    user = User.query.get(current_user.id)
-    user.face_encoding = pickle.dumps(encoding)
-    db.session.commit()
-
-    flash("Wajah Anda berhasil didaftarkan!", "success")
-    return jsonify({'status': 'success', 'message': 'Wajah berhasil didaftarkan! Anda akan diarahkan ke halaman utama.'})
+@main.route('/setup')
+def setup():
+    try:
+        # Create tables
+        db.create_all()
+        
+        # Create admin user if not exists
+        admin_user = User.query.filter_by(is_admin=True).first()
+        if not admin_user:
+            from werkzeug.security import generate_password_hash
+            admin_user = User(
+                name='Administrator',
+                nim='ADMIN001',
+                email='admin@hadirku.com',
+                password_hash=generate_password_hash('admin123'),
+                is_admin=True
+            )
+            db.session.add(admin_user)
+        
+        # Add sample subjects if not exist
+        sample_subjects = [
+            {'code': 'S1076', 'name': 'Kecerdasan Bisnis', 'description': 'Yanuar Wicaksono, S.Kom., M.Kom'},
+            {'code': 'S1079', 'name': 'Sistem Pendukung Keputusan', 'description': 'Dadang Heksaputra, S.Kom., M.Kom.'},
+            {'code': 'S1081', 'name': 'Manajemen Proyek', 'description': 'Raden Nur Rachman Dzakiyullah, S.Kom., M.Sc.'},
+            {'code': 'S1084', 'name': 'Statistika untuk Bisnis', 'description': 'Asti Ratnasari, S.Kom., M.Kom'},
+        ]
+        
+        for subject_data in sample_subjects:
+            if not Subject.query.filter_by(code=subject_data['code']).first():  # PERBAIKAN: MataKuliah → Subject
+                subject = Subject(**subject_data)  # PERBAIKAN: MataKuliah → Subject
+                db.session.add(subject)
+        
+        db.session.commit()
+        
+        return jsonify({
+            'message': 'Database setup completed successfully!',
+            'admin_email': 'admin@hadirku.com',
+            'admin_password': 'admin123'
+        })
+        
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
