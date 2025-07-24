@@ -1,73 +1,41 @@
-from app import db
 from flask_login import UserMixin
 from datetime import datetime
-from werkzeug.security import generate_password_hash, check_password_hash
+from flask_sqlalchemy import SQLAlchemy
+
+# Inisialisasi db di sini
+db = SQLAlchemy()
 
 class User(UserMixin, db.Model):
-    __tablename__ = 'users'
-    
+    __tablename__ = 'user'
     id = db.Column(db.Integer, primary_key=True)
-    name = db.Column(db.String(255), nullable=False)
-    nim = db.Column(db.String(20), unique=True, nullable=False)
-    email = db.Column(db.String(255), unique=True, nullable=False)
-    password_hash = db.Column(db.String(255), nullable=False)
-    face_encoding = db.Column(db.LargeBinary)
-    is_admin = db.Column(db.Boolean, default=False, nullable=False)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    name = db.Column(db.String(100), unique=True, nullable=False)
+    password = db.Column(db.String(200), nullable=False)
+    is_admin = db.Column(db.Boolean, nullable=False, default=False)
     
-    # Relationships
-    attendance_records = db.relationship('AttendanceRecord', backref='user', lazy=True)
+    # Kolom untuk menyimpan data encoding wajah (vektor 128-dimensi)
+    face_encoding = db.Column(db.LargeBinary, nullable=True)
     
-    def set_password(self, password):
-        self.password_hash = generate_password_hash(password)
-    
-    def check_password(self, password):
-        return check_password_hash(self.password_hash, password)
-    
-    def __repr__(self):
-        return f'<User {self.name}>'
+    records = db.relationship('AttendanceRecord', back_populates='user', lazy='dynamic')
 
-class Subject(db.Model):
-    __tablename__ = 'subjects'
-    
+class MataKuliah(db.Model):
+    __tablename__ = 'mata_kuliah'
     id = db.Column(db.Integer, primary_key=True)
-    code = db.Column(db.String(20), nullable=False, unique=True)
-    name = db.Column(db.String(255), nullable=False)
-    description = db.Column(db.Text, nullable=True)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    
-    # Relationships
-    attendance_records = db.relationship('AttendanceRecord', backref='subject', lazy=True)
-    
-    def __repr__(self):
-        return f'<Subject {self.code}: {self.name}>'
-    
-    def validate_data(self):
-        errors = []
-        
-        if not self.code or not self.code.strip():
-            errors.append("Kode mata kuliah harus diisi")
-        
-        if not self.name or not self.name.strip():
-            errors.append("Nama mata kuliah harus diisi")
-        
-        if len(self.code.strip()) > 20:
-            errors.append("Kode mata kuliah maksimal 20 karakter")
-        
-        if len(self.name.strip()) > 255:
-            errors.append("Nama mata kuliah maksimal 255 karakter")
-        
-        return errors
+    kode_mk = db.Column(db.String(20), unique=True, nullable=False)
+    nama_mk = db.Column(db.String(100), nullable=False)
+    dosen_pengampu = db.Column(db.String(100), nullable=False)
+    records = db.relationship('AttendanceRecord', back_populates='matakuliah', lazy='dynamic')
 
 class AttendanceRecord(db.Model):
-    __tablename__ = 'attendance_records'
-    
+    __tablename__ = 'attendance_record'
     id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
-    subject_id = db.Column(db.Integer, db.ForeignKey('subjects.id'), nullable=False)
-    status = db.Column(db.String(20), nullable=False, default='hadir')
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    matakuliah_id = db.Column(db.Integer, db.ForeignKey('mata_kuliah.id'), nullable=False)
     timestamp = db.Column(db.DateTime, default=datetime.utcnow)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
     
-    def __repr__(self):
-        return f'<AttendanceRecord {self.user.name} - {self.subject.name}>'
+    latitude = db.Column(db.Float, nullable=True)
+    longitude = db.Column(db.Float, nullable=True)
+    location = db.Column(db.String(200), nullable=True)
+    image_path = db.Column(db.String(200), nullable=False)
+
+    user = db.relationship('User', back_populates='records')
+    matakuliah = db.relationship('MataKuliah', back_populates='records')
