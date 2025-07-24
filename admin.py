@@ -1,7 +1,6 @@
 from flask import redirect, url_for, flash, request
 from flask_admin import Admin, BaseView, expose, AdminIndexView
 from flask_admin.contrib.sqla import ModelView
-from flask_admin.form import rules  # PERBAIKAN: Import rules dari flask_admin.form
 from flask_login import current_user
 from wtforms import ValidationError
 from models import User, Subject, AttendanceRecord
@@ -78,17 +77,28 @@ class AttendanceAdmin(ModelView):
     def inaccessible_callback(self, name, **kwargs):
         return redirect(url_for('auth.login'))
     
-    column_list = ['user.name', 'user.nim', 'subject.name', 'status', 'timestamp']
-    column_searchable_list = ['user.name', 'user.nim']
-    column_filters = ['status', 'timestamp']
+    # PERBAIKAN: Hanya gunakan direct fields untuk column_list dan searchable
+    column_list = ['user_id', 'subject_id', 'status', 'timestamp']
+    column_searchable_list = ['status']  # PERBAIKAN: Hanya field langsung yang bisa di-search
+    column_filters = ['status', 'timestamp', 'user_id', 'subject_id']
+    
+    # Custom column formatters untuk menampilkan nama
+    column_formatters = {
+        'user_id': lambda v, c, m, p: m.user.name if m.user else 'N/A',
+        'subject_id': lambda v, c, m, p: m.subject.name if m.subject else 'N/A'
+    }
     
     column_labels = {
-        'user.name': 'Nama Mahasiswa',
-        'user.nim': 'NIM',
-        'subject.name': 'Mata Kuliah',
+        'user_id': 'Nama Mahasiswa',
+        'subject_id': 'Mata Kuliah',
         'status': 'Status',
         'timestamp': 'Waktu Presensi'
     }
+    
+    # Disable creation from admin panel (attendance should be done via face recognition)
+    can_create = False
+    can_edit = True
+    can_delete = True
 
 def init_admin(app):
     admin = Admin(app, name='Admin Hadirku', template_mode='bootstrap3', index_view=MyAdminIndexView())
