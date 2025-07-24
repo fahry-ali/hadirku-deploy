@@ -1,189 +1,173 @@
-from flask import Blueprint, render_template, request, redirect, url_for, flash, jsonify
-from flask_login import login_required, current_user
-from werkzeug.utils import secure_filename
 import os
-import cv2
-import numpy as np
-from datetime import datetime
-import pytz
-import base64
-from io import BytesIO
-from PIL import Image
-from models import db, User, Subject, AttendanceRecord  # PERBAIKAN: MataKuliah → Subject
-from face_utils_mediapipe import generate_encoding_from_image, find_match_in_db
-import logging
+from flask import Flask
+from flask_login import LoginManager
 
-main = Blueprint('main', __name__)
+#Impor db dan model dari file models.py
+from models import db, User
 
-@main.route('/')
-def index():
-    if current_user.is_authenticated:
-        return render_template('index.html', user=current_user)
-    return render_template('index.html')
+def create_app():
+    """
+    Factory function untuk membuat dan mengkonfigurasi aplikasi Flask.
+    """
+    app = Flask(__name__, instance_relative_config=True)
 
-@main.route('/register_face')
-@login_required
-def register_face():
-    return render_template('register_face.html')
-
-@main.route('/process_face_registration', methods=['POST'])
-@login_required
-def process_face_registration():
-    try:
-        data = request.get_json()
-        image_data = data.get('image')
-        
-        if not image_data:
-            return jsonify({'success': False, 'message': 'Tidak ada data gambar'})
-        
-        # Decode base64 image
-        image_data = image_data.split(',')[1]
-        image_bytes = base64.b64decode(image_data)
-        image = Image.open(BytesIO(image_bytes))
-        
-        # Convert ke RGB array
-        image_rgb = np.array(image.convert('RGB'))
-        
-        # Generate face encoding
-        encoding = generate_encoding_from_image(image_rgb)
-        
-        if encoding is None:
-            return jsonify({'success': False, 'message': 'Wajah tidak terdeteksi. Pastikan wajah terlihat jelas.'})
-        
-        # Save encoding to user
-        current_user.face_encoding = encoding.tobytes()
-        db.session.commit()
-        
-        return jsonify({'success': True, 'message': 'Registrasi wajah berhasil!'})
-        
-    except Exception as e:
-        logging.error(f"Face registration error: {e}")
-        return jsonify({'success': False, 'message': f'Error: {str(e)}'})
-
-@main.route('/attendance')
-@login_required
-def attendance():
-    subjects = Subject.query.all()  # PERBAIKAN: MataKuliah → Subject
-    return render_template('attendance.html', subjects=subjects)
-
-@main.route('/process_attendance', methods=['POST'])
-@login_required
-def process_attendance():
-    try:
-        data = request.get_json()
-        image_data = data.get('image')
-        subject_id = data.get('subject_id')
-        
-        if not image_data or not subject_id:
-            return jsonify({'success': False, 'message': 'Data tidak lengkap'})
-        
-        # Decode image
-        image_data = image_data.split(',')[1]
-        image_bytes = base64.b64decode(image_data)
-        image = Image.open(BytesIO(image_bytes))
-        image_rgb = np.array(image.convert('RGB'))
-        
-        # Generate encoding from captured image
-        captured_encoding = generate_encoding_from_image(image_rgb)
-        
-        if captured_encoding is None:
-            return jsonify({'success': False, 'message': 'Wajah tidak terdeteksi'})
-        
-        # Find match in database
-        matched_user = find_match_in_db(captured_encoding)
-        
-        if not matched_user:
-            return jsonify({'success': False, 'message': 'Wajah tidak dikenali'})
-        
-        # Check if user already attended today
-        today = datetime.now(pytz.timezone('Asia/Jakarta')).date()
-        existing_record = AttendanceRecord.query.filter_by(
-            user_id=matched_user.id,
-            subject_id=subject_id
-        ).filter(
-            db.func.date(AttendanceRecord.timestamp) == today
-        ).first()
-        
-        if existing_record:
-            return jsonify({'success': False, 'message': 'Anda sudah melakukan presensi hari ini'})
-        
-        # Create attendance record
-        attendance = AttendanceRecord(
-            user_id=matched_user.id,
-            subject_id=subject_id,
-            status='hadir',
-            timestamp=datetime.now(pytz.timezone('Asia/Jakarta'))
-        )
-        
-        db.session.add(attendance)
-        db.session.commit()
-        
-        return jsonify({
-            'success': True, 
-            'message': f'Presensi berhasil untuk {matched_user.name}',
-            'user_name': matched_user.name
-        })
-        
-    except Exception as e:
-        logging.error(f"Attendance processing error: {e}")
-        return jsonify({'success': False, 'message': f'Error: {str(e)}'})
-
-@main.route('/records')
-@login_required
-def records():
-    if current_user.is_admin:
-        # Admin can see all records
-        records = AttendanceRecord.query.join(User).join(Subject).order_by(
-            AttendanceRecord.timestamp.desc()
-        ).all()
-    else:
-        # Users can only see their own records
-        records = AttendanceRecord.query.filter_by(user_id=current_user.id).join(Subject).order_by(
-            AttendanceRecord.timestamp.desc()
-        ).all()
+    # --- Konfigurasi Aplikasi ---
+    # Production environment variables
+    app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'ganti-dengan-kunci-rahasia-yang-sangat-kuat')
     
-    return render_template('records.html', records=records)
+    # Database configuration untuk Railway
+    database_url = os.environ.get('DATABASE_URL')
+    if database_url:
+        # Railway PostgreSQL - fix untuk Railway
+        if database_url.startswith('postgres://'):
+            database_url = database_url.replace('postgres://', 'postgresql://', 1)
+        app.config['SQLALCHEMY_DATABASE_URI'] = database_url
+    else:
+        # Local SQLite fallback
+        app.config['SQLALCHEMY_DATABASE_URI'] = f"sqlite:///{os.path.join(app.instance_path, 'attendance.db')}"
+    
+    app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+    app.config['FLASK_ADMIN_SWATCH'] = 'cerulean'
 
-@main.route('/setup')
-def setup():
-    try:
-        # Create tables
+    # --- Inisialisasi Ekstensi ---
+    db.init_app(app)
+    
+    login_manager = LoginManager()
+    login_manager.init_app(app)
+    login_manager.login_view = 'auth.login'
+
+    # --- User Loader ---
+    @login_manager.user_loader
+    def load_user(user_id):
+        return User.query.get(int(user_id))
+
+    # --- Registrasi Blueprints (Rute) ---
+    from auth import auth as auth_blueprint
+    app.register_blueprint(auth_blueprint)
+
+    from main import main as main_blueprint
+    app.register_blueprint(main_blueprint)
+
+    # Health check endpoint untuk Railway
+    @app.route('/health')
+    def health_check():
+        return {'status': 'healthy', 'service': 'hadirku-project'}
+    
+    # Setup endpoint untuk Railway manual setup
+    @app.route('/setup-admin/<password>')
+    def setup_admin_endpoint(password):
+        """
+        Endpoint untuk create admin secara manual di Railway
+        Usage: https://your-app.railway.app/setup-admin/yourpassword
+        """
+        if password != "railway123":  # Simple security
+            return {'error': 'Invalid setup password'}, 403
+            
+        from models import User, MataKuliah
+        from werkzeug.security import generate_password_hash
+        
+        try:
+            # Create admin if not exists
+            admin_exists = User.query.filter_by(is_admin=True).first()
+            if not admin_exists:
+                admin_user = User(
+                    name="admin",
+                    password=generate_password_hash("admin123", method='pbkdf2:sha256'),
+                    is_admin=True
+                )
+                db.session.add(admin_user)
+            
+            # Create courses if not exists
+            course_exists = MataKuliah.query.first()
+            if not course_exists:
+                courses = [
+                    MataKuliah(kode_mk="S1076", nama_mk="Kecerdasan Bisnis", dosen_pengampu="Yanuar Wicaksono, S.Kom., M.Kom"),
+                    MataKuliah(kode_mk="SI079", nama_mk="Sistem Pendukung Keputusan", dosen_pengampu="Dadang Heksaputra, S.Kom., M.Kom."),
+                    MataKuliah(kode_mk="S1081", nama_mk="Manajemen Proyek", dosen_pengampu="Raden Nur Rachman Dzakiyullah, S.Kom., M.Sc."),
+                    MataKuliah(kode_mk="S1084", nama_mk="Statistika untuk Bisnis", dosen_pengampu="Asti Ratnasari, S.Kom., M.Kom")
+                ]
+                for course in courses:
+                    db.session.add(course)
+            
+            db.session.commit()
+            
+            return {
+                'status': 'success',
+                'message': 'Admin and courses created successfully',
+                'admin_username': 'admin',
+                'admin_password': 'admin123',
+                'login_url': '/login'
+            }
+            
+        except Exception as e:
+            db.session.rollback()
+            return {'error': str(e)}, 500
+
+    with app.app_context():
+        # --- Inisialisasi Panel Admin ---
+        from admin import setup_admin
+        setup_admin(app, db)
+
+        # --- Membuat Folder dan Database ---
+        try:
+            os.makedirs(app.instance_path)
+        except OSError:
+            pass 
+
+        captures_path = os.path.join(app.static_folder, 'captures')
+        if not os.path.exists(captures_path):
+            os.makedirs(captures_path)
+            
+        # Membuat semua tabel database jika belum ada
         db.create_all()
         
-        # Create admin user if not exists
-        admin_user = User.query.filter_by(is_admin=True).first()
-        if not admin_user:
-            from werkzeug.security import generate_password_hash
-            admin_user = User(
-                name='Administrator',
-                nim='ADMIN001',
-                email='admin@hadirku.com',
-                password_hash=generate_password_hash('admin123'),
-                is_admin=True
-            )
-            db.session.add(admin_user)
-        
-        # Add sample subjects if not exist
-        sample_subjects = [
-            {'code': 'S1076', 'name': 'Kecerdasan Bisnis', 'description': 'Yanuar Wicaksono, S.Kom., M.Kom'},
-            {'code': 'S1079', 'name': 'Sistem Pendukung Keputusan', 'description': 'Dadang Heksaputra, S.Kom., M.Kom.'},
-            {'code': 'S1081', 'name': 'Manajemen Proyek', 'description': 'Raden Nur Rachman Dzakiyullah, S.Kom., M.Sc.'},
-            {'code': 'S1084', 'name': 'Statistika untuk Bisnis', 'description': 'Asti Ratnasari, S.Kom., M.Kom'},
+        # --- AUTO SETUP untuk Railway ---
+        setup_initial_data()
+
+    return app
+
+def setup_initial_data():
+    """
+    Setup initial data untuk Railway deployment
+    """
+    from models import User, MataKuliah
+    from werkzeug.security import generate_password_hash
+    
+    # 1. Create default admin jika belum ada
+    admin_exists = User.query.filter_by(is_admin=True).first()
+    if not admin_exists:
+        default_admin = User(
+            name="admin",
+            password=generate_password_hash("admin123", method='pbkdf2:sha256'),
+            is_admin=True
+        )
+        db.session.add(default_admin)
+        print("✅ Default admin created: username=admin, password=admin123")
+    
+    # 2. Create mata kuliah jika belum ada
+    course_exists = MataKuliah.query.first()
+    if not course_exists:
+        courses = [
+            MataKuliah(kode_mk="S1076", nama_mk="Kecerdasan Bisnis", dosen_pengampu="Yanuar Wicaksono, S.Kom., M.Kom"),
+            MataKuliah(kode_mk="SI079", nama_mk="Sistem Pendukung Keputusan", dosen_pengampu="Dadang Heksaputra, S.Kom., M.Kom."),
+            MataKuliah(kode_mk="S1081", nama_mk="Manajemen Proyek", dosen_pengampu="Raden Nur Rachman Dzakiyullah, S.Kom., M.Sc."),
+            MataKuliah(kode_mk="S1084", nama_mk="Statistika untuk Bisnis", dosen_pengampu="Asti Ratnasari, S.Kom., M.Kom")
         ]
-        
-        for subject_data in sample_subjects:
-            if not Subject.query.filter_by(code=subject_data['code']).first():  # PERBAIKAN: MataKuliah → Subject
-                subject = Subject(**subject_data)  # PERBAIKAN: MataKuliah → Subject
-                db.session.add(subject)
-        
+        for course in courses:
+            db.session.add(course)
+        print("✅ Default courses created")
+    
+    try:
         db.session.commit()
-        
-        return jsonify({
-            'message': 'Database setup completed successfully!',
-            'admin_email': 'admin@hadirku.com',
-            'admin_password': 'admin123'
-        })
-        
+        print("✅ Initial data setup completed")
     except Exception as e:
         db.session.rollback()
-        return jsonify({'error': str(e)}), 500
+        print(f"❌ Error setting up initial data: {e}")
+
+if __name__ == '__main__':
+    app = create_app()
+    # Production configuration
+    port = int(os.environ.get('PORT', 5000))
+    debug_mode = os.environ.get('FLASK_ENV') != 'production'
+    app.run(debug=debug_mode, host='0.0.0.0', port=port)
+
