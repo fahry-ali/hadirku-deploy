@@ -1,173 +1,135 @@
 import os
-from flask import Flask
-from flask_login import LoginManager
+import base64
+import pickle
+from datetime import date, datetime
+import numpy as np
+import cv2
+import pytz
 
-#Impor db dan model dari file models.py
-from models import db, User
+from flask import Blueprint, render_template, jsonify, request, current_app, redirect, url_for, flash
+from flask_login import login_required, current_user
+from sqlalchemy.orm import joinedload
 
-def create_app():
-    """
-    Factory function untuk membuat dan mengkonfigurasi aplikasi Flask.
-    """
-    app = Flask(__name__, instance_relative_config=True)
+from models import db, User, MataKuliah, AttendanceRecord
+from face_utils_mediapipe import generate_encoding_from_image, find_match_in_db
 
-    # --- Konfigurasi Aplikasi ---
-    # Production environment variables
-    app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'ganti-dengan-kunci-rahasia-yang-sangat-kuat')
-    
-    # Database configuration untuk Railway
-    database_url = os.environ.get('DATABASE_URL')
-    if database_url:
-        # Railway PostgreSQL - fix untuk Railway
-        if database_url.startswith('postgres://'):
-            database_url = database_url.replace('postgres://', 'postgresql://', 1)
-        app.config['SQLALCHEMY_DATABASE_URI'] = database_url
+main = Blueprint('main', __name__)
+
+@main.route('/')
+@login_required
+def index():
+    if current_user.is_admin:
+        return redirect(url_for('admin.index'))
     else:
-        # Local SQLite fallback
-        app.config['SQLALCHEMY_DATABASE_URI'] = f"sqlite:///{os.path.join(app.instance_path, 'attendance.db')}"
-    
-    app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-    app.config['FLASK_ADMIN_SWATCH'] = 'cerulean'
-
-    # --- Inisialisasi Ekstensi ---
-    db.init_app(app)
-    
-    login_manager = LoginManager()
-    login_manager.init_app(app)
-    login_manager.login_view = 'auth.login'
-
-    # --- User Loader ---
-    @login_manager.user_loader
-    def load_user(user_id):
-        return User.query.get(int(user_id))
-
-    # --- Registrasi Blueprints (Rute) ---
-    from auth import auth as auth_blueprint
-    app.register_blueprint(auth_blueprint)
-
-    from main import main as main_blueprint
-    app.register_blueprint(main_blueprint)
-
-    # Health check endpoint untuk Railway
-    @app.route('/health')
-    def health_check():
-        return {'status': 'healthy', 'service': 'hadirku-project'}
-    
-    # Setup endpoint untuk Railway manual setup
-    @app.route('/setup-admin/<password>')
-    def setup_admin_endpoint(password):
-        """
-        Endpoint untuk create admin secara manual di Railway
-        Usage: https://your-app.railway.app/setup-admin/yourpassword
-        """
-        if password != "railway123":  # Simple security
-            return {'error': 'Invalid setup password'}, 403
-            
-        from models import User, MataKuliah
-        from werkzeug.security import generate_password_hash
+        # Cek apakah pengguna sudah mendaftarkan wajah (punya encoding)
+        if current_user.face_encoding is None:
+            flash('Anda belum mendaftarkan wajah. Silakan selesaikan pendaftaran.', 'warning')
+            return redirect(url_for('main.register_face'))
         
-        try:
-            # Create admin if not exists
-            admin_exists = User.query.filter_by(is_admin=True).first()
-            if not admin_exists:
-                admin_user = User(
-                    name="admin",
-                    password=generate_password_hash("admin123", method='pbkdf2:sha256'),
-                    is_admin=True
-                )
-                db.session.add(admin_user)
-            
-            # Create courses if not exists
-            course_exists = MataKuliah.query.first()
-            if not course_exists:
-                courses = [
-                    MataKuliah(kode_mk="S1076", nama_mk="Kecerdasan Bisnis", dosen_pengampu="Yanuar Wicaksono, S.Kom., M.Kom"),
-                    MataKuliah(kode_mk="SI079", nama_mk="Sistem Pendukung Keputusan", dosen_pengampu="Dadang Heksaputra, S.Kom., M.Kom."),
-                    MataKuliah(kode_mk="S1081", nama_mk="Manajemen Proyek", dosen_pengampu="Raden Nur Rachman Dzakiyullah, S.Kom., M.Sc."),
-                    MataKuliah(kode_mk="S1084", nama_mk="Statistika untuk Bisnis", dosen_pengampu="Asti Ratnasari, S.Kom., M.Kom")
-                ]
-                for course in courses:
-                    db.session.add(course)
-            
-            db.session.commit()
-            
-            return {
-                'status': 'success',
-                'message': 'Admin and courses created successfully',
-                'admin_username': 'admin',
-                'admin_password': 'admin123',
-                'login_url': '/login'
-            }
-            
-        except Exception as e:
-            db.session.rollback()
-            return {'error': str(e)}, 500
+        courses = MataKuliah.query.order_by(MataKuliah.nama_mk).all()
+        return render_template('index.html', name=current_user.name, courses=courses)
 
-    with app.app_context():
-        # --- Inisialisasi Panel Admin ---
-        from admin import setup_admin
-        setup_admin(app, db)
 
-        # --- Membuat Folder dan Database ---
-        try:
-            os.makedirs(app.instance_path)
-        except OSError:
-            pass 
+@main.route('/records')
+@login_required
+def records():
+    if current_user.is_admin:
+        return redirect(url_for('admin.index'))
 
-        captures_path = os.path.join(app.static_folder, 'captures')
-        if not os.path.exists(captures_path):
-            os.makedirs(captures_path)
-            
-        # Membuat semua tabel database jika belum ada
-        db.create_all()
+    wib = pytz.timezone('Asia/Jakarta')
+    user_records = AttendanceRecord.query.options(
+        joinedload(AttendanceRecord.matakuliah)
+    ).filter_by(user_id=current_user.id).order_by(AttendanceRecord.timestamp.desc()).all()
+
+    for record in user_records:
+        record.local_time = record.timestamp.replace(tzinfo=pytz.utc).astimezone(wib)
         
-        # --- AUTO SETUP untuk Railway ---
-        setup_initial_data()
+    return render_template('records.html', records=user_records, name=current_user.name)
 
-    return app
 
-def setup_initial_data():
-    """
-    Setup initial data untuk Railway deployment
-    """
-    from models import User, MataKuliah
-    from werkzeug.security import generate_password_hash
-    
-    # 1. Create default admin jika belum ada
-    admin_exists = User.query.filter_by(is_admin=True).first()
-    if not admin_exists:
-        default_admin = User(
-            name="admin",
-            password=generate_password_hash("admin123", method='pbkdf2:sha256'),
-            is_admin=True
-        )
-        db.session.add(default_admin)
-        print("✅ Default admin created: username=admin, password=admin123")
-    
-    # 2. Create mata kuliah jika belum ada
-    course_exists = MataKuliah.query.first()
-    if not course_exists:
-        courses = [
-            MataKuliah(kode_mk="S1076", nama_mk="Kecerdasan Bisnis", dosen_pengampu="Yanuar Wicaksono, S.Kom., M.Kom"),
-            MataKuliah(kode_mk="SI079", nama_mk="Sistem Pendukung Keputusan", dosen_pengampu="Dadang Heksaputra, S.Kom., M.Kom."),
-            MataKuliah(kode_mk="S1081", nama_mk="Manajemen Proyek", dosen_pengampu="Raden Nur Rachman Dzakiyullah, S.Kom., M.Sc."),
-            MataKuliah(kode_mk="S1084", nama_mk="Statistika untuk Bisnis", dosen_pengampu="Asti Ratnasari, S.Kom., M.Kom")
-        ]
-        for course in courses:
-            db.session.add(course)
-        print("✅ Default courses created")
-    
+@main.route('/mark_attendance', methods=['POST'])
+@login_required
+def mark_attendance():
+    data = request.get_json()
+    if not all(k in data for k in ['image_data', 'location', 'matakuliah_id']):
+        return jsonify({'status': 'error', 'message': 'Permintaan tidak lengkap.'}), 400
+
+    # Cek absensi duplikat
+    today = date.today()
+    if AttendanceRecord.query.filter(
+        AttendanceRecord.user_id == current_user.id,
+        AttendanceRecord.matakuliah_id == data['matakuliah_id'],
+        db.func.date(AttendanceRecord.timestamp) == today
+    ).first():
+        return jsonify({'status': 'warning', 'message': 'Anda sudah presensi untuk mata kuliah ini hari ini.'})
+
+    # Decode gambar dan konversi ke RGB
     try:
-        db.session.commit()
-        print("✅ Initial data setup completed")
+        image_data = data['image_data'].split(',')[1]
+        img_bytes = base64.b64decode(image_data)
+        np_arr = np.frombuffer(img_bytes, np.uint8)
+        frame = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+        rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
     except Exception as e:
-        db.session.rollback()
-        print(f"❌ Error setting up initial data: {e}")
+        return jsonify({'status': 'error', 'message': f'Format data gambar tidak valid: {e}'})
 
-if __name__ == '__main__':
-    app = create_app()
-    # Production configuration
-    port = int(os.environ.get('PORT', 5000))
-    debug_mode = os.environ.get('FLASK_ENV') != 'production'
-    app.run(debug=debug_mode, host='0.0.0.0', port=port)
+    # Panggil fungsi pencocokan dari face_utils
+    matched_user_id, message = find_match_in_db(rgb_frame)
 
+    if matched_user_id == current_user.id:
+        timestamp_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+        image_filename = f"{current_user.name}_{timestamp_str}.jpg"
+        full_image_path = os.path.join(current_app.static_folder, 'captures', image_filename)
+        cv2.imwrite(full_image_path, frame)
+        
+        new_record = AttendanceRecord(
+            user_id=current_user.id,
+            matakuliah_id=data['matakuliah_id'],
+            latitude=data['location'].get('latitude'),
+            longitude=data['location'].get('longitude'),
+            image_path=f"captures/{image_filename}"
+        )
+        db.session.add(new_record)
+        db.session.commit()
+        return jsonify({'status': 'success', 'message': f'Presensi untuk {current_user.name} berhasil!'})
+    
+    elif matched_user_id is not None:
+        matched_user = User.query.get(matched_user_id)
+        return jsonify({'status': 'error', 'message': f'Wajah terdeteksi sebagai {matched_user.name}, bukan {current_user.name}.'})
+    else:
+        return jsonify({'status': 'error', 'message': message})
+
+
+@main.route('/register_face')
+@login_required
+def register_face():
+    return render_template('register_face.html')
+
+
+@main.route('/save_face', methods=['POST'])
+@login_required
+def save_face():
+    data = request.get_json()
+    if 'image_data' not in data:
+        return jsonify({'status': 'error', 'message': 'Data gambar tidak ditemukan.'})
+
+    try:
+        image_data = data['image_data'].split(',')[1]
+        img_bytes = base64.b64decode(image_data)
+        np_arr = np.frombuffer(img_bytes, np.uint8)
+        frame = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+        rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    except Exception:
+        return jsonify({'status': 'error', 'message': 'Format data gambar tidak valid.'})
+
+    encoding = generate_encoding_from_image(rgb_frame)
+    
+    if encoding is None:
+        return jsonify({'status': 'error', 'message': 'Gagal memproses wajah. Pastikan hanya ada SATU wajah di foto dan terlihat jelas.'})
+
+    user = User.query.get(current_user.id)
+    user.face_encoding = pickle.dumps(encoding)
+    db.session.commit()
+
+    flash("Wajah Anda berhasil didaftarkan!", "success")
+    return jsonify({'status': 'success', 'message': 'Wajah berhasil didaftarkan! Anda akan diarahkan ke halaman utama.'})
