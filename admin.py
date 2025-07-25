@@ -74,7 +74,7 @@ def setup_admin(app, db):
     # Buat ModelView sederhana dengan konfigurasi minimal
     mk_view = ModelView(MataKuliah, db.session, name="Data Mata Kuliah")
     mk_view.form_excluded_columns = ['records']  # Exclude relationship
-    mk_view.can_create = True
+    mk_view.can_create = False
     mk_view.can_edit = True
     mk_view.can_delete = True
     admin.add_view(mk_view)
