@@ -84,7 +84,9 @@ def create_app():
                     MataKuliah(kode_mk="S1076", nama_mk="Kecerdasan Bisnis", dosen_pengampu="Yanuar Wicaksono, S.Kom., M.Kom"),
                     MataKuliah(kode_mk="SI079", nama_mk="Sistem Pendukung Keputusan", dosen_pengampu="Dadang Heksaputra, S.Kom., M.Kom."),
                     MataKuliah(kode_mk="S1081", nama_mk="Manajemen Proyek", dosen_pengampu="Raden Nur Rachman Dzakiyullah, S.Kom., M.Sc."),
-                    MataKuliah(kode_mk="S1084", nama_mk="Statistika untuk Bisnis", dosen_pengampu="Asti Ratnasari, S.Kom., M.Kom")
+                    MataKuliah(kode_mk="S1084", nama_mk="Statistika untuk Bisnis", dosen_pengampu="Asti Ratnasari, S.Kom., M.Kom"),
+                    MataKuliah(kode_mk="SI078", nama_mk="Bisnis Digital", dosen_pengampu="Eko Setiawan, S.Kom., M.Sc."),
+                    MataKuliah(kode_mk="SI080", nama_mk="Integrasi Sistem", dosen_pengampu="Dadang Heksaputra, S.Kom., M.Kom.")
                 ]
                 for course in courses:
                     db.session.add(course)
