@@ -1,4 +1,4 @@
-import os
+    import os
 import pytz
 from flask import url_for, redirect, flash, render_template
 from flask_login import current_user
@@ -54,6 +54,9 @@ class AttendanceAdminView(ModelView):
 
 
 class UserAdminView(ModelView):
+    can_create = False
+    can_edit = True
+    can_delete = True
     column_list = ['id', 'name', 'is_admin']
     column_exclude_list = ['password']
     # Sesuaikan dengan nama kolom baru di model User
