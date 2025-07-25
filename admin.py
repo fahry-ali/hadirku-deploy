@@ -65,34 +65,6 @@ class UserAdminView(ModelView):
         return current_user.is_authenticated and current_user.is_admin
 
 
-class MataKuliahAdminView(ModelView):
-    can_create = True
-    can_edit = True
-    can_delete = True
-    page_size = 20
-    
-    # Kolom yang ditampilkan di list view
-    column_list = ['kode_mk', 'nama_mk', 'dosen_pengampu']
-    column_labels = {
-        'kode_mk': 'Kode Mata Kuliah',
-        'nama_mk': 'Nama Mata Kuliah', 
-        'dosen_pengampu': 'Dosen Pengampu'
-    }
-    
-    # Kolom yang bisa dicari
-    column_searchable_list = ['kode_mk', 'nama_mk', 'dosen_pengampu']
-    
-    # Kolom yang dikecualikan dari form (relationship)
-    form_excluded_columns = ['records']
-
-    def is_accessible(self):
-        return current_user.is_authenticated and current_user.is_admin
-    
-    def inaccessible_callback(self, name, **kwargs):
-        flash("Anda harus login sebagai admin untuk mengakses halaman ini.", "warning")
-        return redirect(url_for('auth.login'))
-
-
 def setup_admin(app, db):
     # Gunakan template default Flask-Admin untuk testing
     admin = Admin(app, name='Dashboard Presensi', template_mode='bootstrap4', index_view=MyAdminIndexView(name="Dashboard", url="/admin"))
@@ -108,4 +80,3 @@ def setup_admin(app, db):
     admin.add_view(mk_view)
     
     admin.add_view(AttendanceAdminView(AttendanceRecord, db.session, name="Riwayat Presensi"))
-    
