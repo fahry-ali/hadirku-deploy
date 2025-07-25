@@ -1,4 +1,4 @@
-    import os
+import os
 import pytz
 from flask import url_for, redirect, flash, render_template
 from flask_login import current_user
