@@ -1,13 +1,17 @@
-{% extends "base.html" %} {% block title %}Login{% endblock %} {% block content %}
+{% extends "base.html" %} 
+{% block title %}Login{% endblock %} 
+{% block content %}
 <div class="row justify-content-center">
     <div class="col-md-6 col-lg-4">
-        <div class="card">
+        <div class="card shadow-sm">
             <div class="card-body">
                 <!-- Logo -->
                 <div class="text-center mb-4" style="max-width: 200px; margin: 0 auto;">
                     <img src="{{ url_for('static', filename='img/logo.png') }}" alt="Logo Hadirku" class="img-fluid">
                 </div>
                 <h3 class="card-title text-center mb-4">Masuk Hadirku</h3>
+                
+                <!-- Form Login -->
                 <form method="POST" action="/login">
                     <div class="mb-3">
                         <label for="name" class="form-label">Nama Lengkap</label>
@@ -21,17 +25,20 @@
                         <button type="submit" class="btn btn-primary">Login</button>
                     </div>
                 </form>
-                <p class="text-center mt-3">
-                    login admin
-                    Nama Lengkap: admin
-                    Password: admin123
-                </p>
-                <p class="text-center mt-3">
+
+                <!-- Hint Admin -->
+                <div class="alert alert-info text-center mt-4 mb-0" role="alert">
+                    <strong>Login Admin:</strong><br>
+                    <code>Nama Lengkap: admin</code><br>
+                    <code>Password: admin123</code>
+                </div>
+
+                <!-- Link Signup -->
+                <p class="text-center mt-3 mb-0">
                     Belum punya akun? <a href="{{ url_for('auth.signup') }}">Daftar di sini</a>
                 </p>
             </div>
         </div>
     </div>
 </div>
-
 {% endblock %}
